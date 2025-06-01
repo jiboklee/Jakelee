@@ -39,3 +39,8 @@ def webhook():
 @app.route("/")
 def root():
     return "✅ Binance Auto-Trader Live"
+
+# ✅ 이게 있어야 Render가 포트를 감지합니다
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
