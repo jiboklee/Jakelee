@@ -1,69 +1,41 @@
 from flask import Flask, request, jsonify
-import hmac
-import hashlib
-import time
-import requests
-import os
+import hmac, hashlib, time, os, requests
 
 app = Flask(__name__)
 
-# 🔐 환경 변수에서 키 가져오기 (Render에서 설정)
-API_KEY = os.getenv("BINANCE_API_KEY")
-API_SECRET = os.getenv("BINANCE_API_SECRET")
+API_KEY = os.getenv("API_KEY")
+API_SECRET = os.getenv("API_SECRET")
+BASE_URL = "https://fapi.binance.com"
 
-# ✅ 바이낸스 시장가 매수 함수
-def place_order(symbol, amount):
-    print(f"📦 주문 실행: symbol={symbol}, amount={amount}")
-
-    base_url = "https://api.binance.com"
-    endpoint = "/api/v3/order"
-    url = base_url + endpoint
-
+def place_order(symbol, side, amount):
+    path = "/fapi/v1/order"
+    url = BASE_URL + path
     timestamp = int(time.time() * 1000)
-    params = {
-        "symbol": symbol.upper(),
-        "side": "BUY",
-        "type": "MARKET",
-        "quoteOrderQty": amount,  # USDT 기준 금액 주문
-        "timestamp": timestamp
-    }
+    params = f"symbol={symbol}&side={side.upper()}&type=MARKET&quantity={amount}&timestamp={timestamp}"
 
-    query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-    signature = hmac.new(API_SECRET.encode('utf-8'), query_string.encode('utf-8'), hashlib.sha256).hexdigest()
+    signature = hmac.new(API_SECRET.encode(), params.encode(), hashlib.sha256).hexdigest()
+    full_url = f"{url}?{params}&signature={signature}"
+    headers = {"X-MBX-API-KEY": API_KEY}
 
-    params["signature"] = signature
-    headers = {
-        "X-MBX-APIKEY": API_KEY
-    }
+    res = requests.post(full_url, headers=headers)
+    return res.json()
 
-    try:
-        response = requests.post(url, headers=headers, params=params)
-        print(f"📤 바이낸스 응답: {response.status_code} - {response.text}")
-        return response.json()
-    except Exception as e:
-        print(f"❌ 주문 실패: {e}")
-        return {"error": str(e)}
-
-# ✅ Webhook 수신 처리
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    try:
-        data = request.get_json(force=True)
-        print(f"📩 받은 메시지: {data}")
+    data = request.get_json()
+    print("📥 Received webhook:", data)
 
-        symbol = data.get("symbol")
-        amount = data.get("amount")
+    symbol = data.get("symbol")
+    action = data.get("action")
+    amount = data.get("amount", 30)
 
-        if not symbol or not amount:
-            print("⚠️ 누락된 파라미터: symbol 또는 amount 없음")
-            return jsonify({"error": "symbol or amount missing"}), 400
+    if not all([symbol, action]):
+        return "Invalid payload", 400
 
-        result = place_order(symbol, amount)
-        return jsonify(result)
-    except Exception as e:
-        print(f"❌ Webhook 처리 중 에러: {e}")
-        return jsonify({"error": str(e)}), 500
+    result = place_order(symbol, action, amount)
+    print("📤 Order result:", result)
+    return jsonify(result)
 
-# Render 전용 실행 구문
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+@app.route("/")
+def root():
+    return "✅ Binance Auto-Trader Live"
