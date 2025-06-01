@@ -11,9 +11,9 @@ app = Flask(__name__)
 API_KEY = os.getenv("BINANCE_API_KEY")
 API_SECRET = os.getenv("BINANCE_API_SECRET")
 
-# 주문 함수
+# 바이낸스 주문 함수
 def place_order(symbol, amount):
-    print(f"📦 바이낸스에 주문 전송 준비: {symbol}, {amount}")
+    print(f"📦 주문 실행: symbol={symbol}, amount={amount}")
 
     base_url = "https://api.binance.com"
     endpoint = "/api/v3/order"
@@ -24,7 +24,7 @@ def place_order(symbol, amount):
         "symbol": symbol,
         "side": "BUY",
         "type": "MARKET",
-        "quoteOrderQty": amount,  # 금액 기준 주문
+        "quoteOrderQty": amount,
         "timestamp": timestamp
     }
 
@@ -36,7 +36,6 @@ def place_order(symbol, amount):
     ).hexdigest()
 
     params["signature"] = signature
-
     headers = {
         "X-MBX-APIKEY": API_KEY
     }
@@ -46,10 +45,10 @@ def place_order(symbol, amount):
         print(f"📤 바이낸스 응답: {response.status_code} - {response.text}")
         return response.json()
     except Exception as e:
-        print(f"❌ 바이낸스 주문 실패: {e}")
+        print(f"❌ 주문 중 오류 발생: {e}")
         return {"error": str(e)}
 
-# 웹훅 엔드포인트
+# Webhook 엔드포인트
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -60,13 +59,14 @@ def webhook():
         amount = data.get("amount")
 
         if not symbol or not amount:
+            print("❗ symbol 또는 amount가 누락됨.")
             return jsonify({"error": "symbol or amount missing"}), 400
 
         result = place_order(symbol, amount)
         return jsonify(result)
     except Exception as e:
-        print(f"❌ 처리 중 예외 발생: {e}")
+        print(f"❌ Webhook 처리 오류: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host="0.0.0.0", port=10000)
