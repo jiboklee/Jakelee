@@ -7,6 +7,7 @@ import requests
 
 app = Flask(__name__)
 
+# Render 환경 변수에서 API 키 불러오기
 API_KEY = os.getenv("BINANCE_API_KEY")
 API_SECRET = os.getenv("BINANCE_API_SECRET")
 
@@ -28,9 +29,12 @@ def webhook():
 def place_order(symbol, usdt_amount):
     url = "https://api.binance.com/api/v3/order"
     timestamp = int(time.time() * 1000)
+
+    # 시장가 매수 주문 구성
     params = f"symbol={symbol}&side=BUY&type=MARKET&quoteOrderQty={usdt_amount}&timestamp={timestamp}"
     signature = hmac.new(API_SECRET.encode(), params.encode(), hashlib.sha256).hexdigest()
     full_url = f"{url}?{params}&signature={signature}"
+
     headers = {
         "X-MBX-APIKEY": API_KEY
     }
@@ -39,5 +43,7 @@ def place_order(symbol, usdt_amount):
     print("📤 바이낸스 응답:", res.json())
     return res.json()
 
+# ✅ Render 외부에서 접근 가능하도록 설정 (핵심!)
 if __name__ == '__main__':
-    app.run()
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
