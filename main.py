@@ -30,9 +30,18 @@ def webhook():
         action = data.get("action")
         amount = data.get("amount")
 
+        print(f"[🔍 Parsed] symbol={symbol}, action={action}, amount={amount}")
+
         if not symbol or not action or not amount:
             print("[❌ ERROR] Missing required field in payload")
             return jsonify({"error": "Missing symbol/action/amount"}), 400
+
+        # 🔧 수량을 float으로 강제 변환 및 유효성 검사
+        try:
+            amount = float(amount)
+        except:
+            print(f"[❌ ERROR] amount '{amount}' is not a valid number")
+            return jsonify({"error": "Invalid amount format"}), 400
 
         # 🔧 레버리지 자동 설정
         set_leverage(symbol, leverage=10)
@@ -75,7 +84,7 @@ def place_order(symbol, action, amount):
             "symbol": symbol,
             "side": "BUY" if action.lower() == "buy" else "SELL",
             "type": "MARKET",
-            "quantity": round(float(amount), 3),  # 소수점 3자리 반올림
+            "quantity": round(float(amount), 3),
             "timestamp": int(time.time() * 1000)
         }
 
@@ -87,9 +96,9 @@ def place_order(symbol, action, amount):
             "X-MBX-APIKEY": API_KEY
         }
 
-        res = requests.post(url, params=params, headers=headers)
-
+        # 🔍 Binance 주문 요청 및 응답 출력
         print("[📤 Request Params]:", params)
+        res = requests.post(url, params=params, headers=headers)
         print("[🧾 Binance API Response]:", res.text)
 
         return res.json()
