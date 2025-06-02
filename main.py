@@ -1,82 +1,60 @@
 from flask import Flask, request, jsonify
-from binance.client import Client
-from binance.enums import *
 import os
+import json
+import requests
+import hmac
+import hashlib
 
 app = Flask(__name__)
 
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
-client = Client(API_KEY, API_SECRET)
 
-@app.route("/webhook", methods=["POST"])
+@app.route('/')
+def home():
+    return "Binance Auto Trading Server is running."
+
+@app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         data = request.get_json(force=True)
-        if not data:
-            print("❌ [ERROR] Webhook에 JSON 데이터 없음")
-            return jsonify({"error": "Invalid JSON"}), 400
+        print("[Webhook Triggered] 🔔")
+        print("Payload:", data)
 
-        signal = data.get("signal")
-        strategy = data.get("strategy")
-        if signal not in ["buy", "sell"] or strategy != "Aggressive5min":
-            print(f"❌ [ERROR] 잘못된 요청: signal={signal}, strategy={strategy}")
-            return jsonify({"error": "Invalid signal or strategy"}), 400
+        symbol = data.get("symbol")
+        action = data.get("action")
+        amount = data.get("amount")
 
-        symbol = "BTCUSDT"
-        usdt_amount = 30
-        leverage = 5
+        if not symbol or not action or not amount:
+            print("[❌ ERROR] Missing required field in payload")
+            return jsonify({"error": "Missing symbol/action/amount"}), 400
 
-        client.futures_change_leverage(symbol=symbol, leverage=leverage)
-        mark_price = float(client.futures_mark_price(symbol=symbol)['markPrice'])
-        qty = round((usdt_amount * leverage) / mark_price, 3)
-
-        print(f"📥 Webhook 수신됨: {signal.upper()} | 전략: {strategy} | 수량: {qty} | 가격: {mark_price}")
-
-        if signal == "buy":
-            client.futures_create_order(symbol=symbol, side=SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=qty)
-            tp = round(mark_price * 1.004, 2)
-            sl = round(mark_price * 0.996, 2)
-            close_side = SIDE_SELL
-        else:
-            client.futures_create_order(symbol=symbol, side=SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=qty)
-            tp = round(mark_price * 0.996, 2)
-            sl = round(mark_price * 1.004, 2)
-            close_side = SIDE_BUY
-
-        client.futures_create_order(
-            symbol=symbol,
-            side=close_side,
-            type=ORDER_TYPE_LIMIT,
-            price=str(tp),
-            quantity=qty,
-            timeInForce=TIME_IN_FORCE_GTC,
-            reduceOnly=True
-        )
-
-        try:
-            client.futures_create_order(
-                symbol=symbol,
-                side=close_side,
-                type=ORDER_TYPE_STOP_MARKET,
-                stopPrice=str(sl),
-                quantity=qty,
-                reduceOnly=True
-            )
-        except Exception as e:
-            print("❌ SL 주문 실패:", str(e))
-
-        print(f"✅ {signal.upper()} 주문 완료 | TP: {tp}, SL: {sl}")
-        return jsonify({"status": "ok"}), 200
+        response = place_order(symbol, action, amount)
+        print("[✅ Order Response]:", response)
+        return jsonify(response)
 
     except Exception as e:
-        print("❌ [Webhook 처리 오류]", str(e))
-        return jsonify({"error": "Internal server error"}), 500
+        print("[❌ Exception]:", str(e))
+        return jsonify({"error": str(e)}), 500
 
-@app.route("/")
-def index():
-    return "✅ Binance Webhook 서버 작동 중"
+def place_order(symbol, action, amount):
+    url = "https://fapi.binance.com/fapi/v1/order"
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    params = {
+        "symbol": symbol,
+        "side": "BUY" if action == "buy" else "SELL",
+        "type": "MARKET",
+        "quantity": amount,
+        "timestamp": int(round(time.time() * 1000))
+    }
+
+    query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+    signature = hmac.new(API_SECRET.encode(), query_string.encode(), hashlib.sha256).hexdigest()
+    params["signature"] = signature
+
+    headers = {
+        "X-MBX-APIKEY": API_KEY
+    }
+
+    res = requests.post(url, params=params, headers=headers)
+    return res.json()
