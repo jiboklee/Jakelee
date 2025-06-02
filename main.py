@@ -4,6 +4,7 @@ import json
 import requests
 import hmac
 import hashlib
+import time  # 꼭 있어야 합니다!
 
 app = Flask(__name__)
 
@@ -58,3 +59,8 @@ def place_order(symbol, action, amount):
 
     res = requests.post(url, params=params, headers=headers)
     return res.json()
+
+# ✅ 반드시 추가해야 함 (Render에서 포트 인식)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
