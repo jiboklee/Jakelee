@@ -4,12 +4,15 @@ import json
 import requests
 import hmac
 import hashlib
-import time  # 꼭 있어야 합니다!
+import time
 
 app = Flask(__name__)
 
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
+
+if not API_KEY or not API_SECRET:
+    raise Exception("❌ API_KEY or API_SECRET is not set in environment variables")
 
 @app.route('/')
 def home():
@@ -41,26 +44,35 @@ def webhook():
 def place_order(symbol, action, amount):
     url = "https://fapi.binance.com/fapi/v1/order"
 
-    params = {
-        "symbol": symbol,
-        "side": "BUY" if action == "buy" else "SELL",
-        "type": "MARKET",
-        "quantity": amount,
-        "timestamp": int(round(time.time() * 1000))
-    }
+    try:
+        params = {
+            "symbol": symbol,
+            "side": "BUY" if action.lower() == "buy" else "SELL",
+            "type": "MARKET",
+            "quantity": round(float(amount), 3),  # 중요: 소수점 반올림
+            "timestamp": int(time.time() * 1000)
+        }
 
-    query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
-    signature = hmac.new(API_SECRET.encode(), query_string.encode(), hashlib.sha256).hexdigest()
-    params["signature"] = signature
+        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+        signature = hmac.new(API_SECRET.encode(), query_string.encode(), hashlib.sha256).hexdigest()
+        params["signature"] = signature
 
-    headers = {
-        "X-MBX-APIKEY": API_KEY
-    }
+        headers = {
+            "X-MBX-APIKEY": API_KEY
+        }
 
-    res = requests.post(url, params=params, headers=headers)
-    return res.json()
+        res = requests.post(url, params=params, headers=headers)
 
-# ✅ 반드시 추가해야 함 (Render에서 포트 인식)
+        print("[📤 Request Params]:", params)
+        print("[🧾 Raw Response]:", res.text)  # 🔍 응답 텍스트 확인용
+
+        return res.json()
+
+    except Exception as e:
+        print("[❌ Binance Order Exception]:", str(e))
+        return {"error": str(e)}
+
+# ✅ 포트 지정 필수
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
