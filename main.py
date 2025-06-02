@@ -8,6 +8,7 @@ import time
 
 app = Flask(__name__)
 
+# 🔐 환경변수에서 API 키 가져오기
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 
@@ -33,6 +34,10 @@ def webhook():
             print("[❌ ERROR] Missing required field in payload")
             return jsonify({"error": "Missing symbol/action/amount"}), 400
 
+        # 🔧 레버리지 자동 설정
+        set_leverage(symbol, leverage=10)
+
+        # 📩 주문 실행
         response = place_order(symbol, action, amount)
         print("[✅ Order Response]:", response)
         return jsonify(response)
@@ -41,6 +46,27 @@ def webhook():
         print("[❌ Exception]:", str(e))
         return jsonify({"error": str(e)}), 500
 
+# 🔧 레버리지 설정 함수
+def set_leverage(symbol, leverage=10):
+    url = "https://fapi.binance.com/fapi/v1/leverage"
+    params = {
+        "symbol": symbol,
+        "leverage": leverage,
+        "timestamp": int(time.time() * 1000)
+    }
+
+    query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+    signature = hmac.new(API_SECRET.encode(), query_string.encode(), hashlib.sha256).hexdigest()
+    params["signature"] = signature
+
+    headers = {
+        "X-MBX-APIKEY": API_KEY
+    }
+
+    res = requests.post(url, params=params, headers=headers)
+    print("[⚙️ Set Leverage Response]:", res.text)
+
+# 📈 주문 실행 함수
 def place_order(symbol, action, amount):
     url = "https://fapi.binance.com/fapi/v1/order"
 
@@ -49,7 +75,7 @@ def place_order(symbol, action, amount):
             "symbol": symbol,
             "side": "BUY" if action.lower() == "buy" else "SELL",
             "type": "MARKET",
-            "quantity": round(float(amount), 3),  # 중요: 소수점 반올림
+            "quantity": round(float(amount), 3),  # 소수점 3자리 반올림
             "timestamp": int(time.time() * 1000)
         }
 
@@ -64,7 +90,7 @@ def place_order(symbol, action, amount):
         res = requests.post(url, params=params, headers=headers)
 
         print("[📤 Request Params]:", params)
-        print("[🧾 Raw Response]:", res.text)  # 🔍 응답 텍스트 확인용
+        print("[🧾 Binance API Response]:", res.text)
 
         return res.json()
 
@@ -72,7 +98,7 @@ def place_order(symbol, action, amount):
         print("[❌ Binance Order Exception]:", str(e))
         return {"error": str(e)}
 
-# ✅ 포트 지정 필수
+# ✅ Render용 포트 실행
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
