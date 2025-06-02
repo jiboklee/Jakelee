@@ -1,37 +1,3 @@
-//@version=5
-indicator("Scalp_TrendMomentum_5min_Aggressive", overlay=true)
-
-ema20 = ta.ema(close, 20)
-ema50 = ta.ema(close, 50)
-rsi = ta.rsi(close, 14)
-vol = volume
-volAvg = ta.sma(volume, 20)
-
-longTrend = ema20 > ema50
-longRSI = rsi < 60
-longCandle = (close > open) and (close - open > (high - low) * 0.6)
-longVolume = vol > volAvg
-
-longSignal = longTrend and longRSI and longCandle and longVolume
-
-shortTrend = ema20 < ema50
-shortRSI = rsi > 40
-shortCandle = (close < open) and (open - close > (high - low) * 0.6)
-shortVolume = vol > volAvg
-
-shortSignal = shortTrend and shortRSI and shortCandle and shortVolume
-
-alertcondition(longSignal, title="Aggressive Long", message='{"signal":"buy", "strategy":"Aggressive5min", "ticker":"{{ticker}}", "price":{{close}}}')
-alertcondition(shortSignal, title="Aggressive Short", message='{"signal":"sell", "strategy":"Aggressive5min", "ticker":"{{ticker}}", "price":{{close}}}')
-
-plotshape(longSignal, title="Buy", location=location.belowbar, color=color.lime, style=shape.triangleup, size=size.small)
-plotshape(shortSignal, title="Sell", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.small)
-
-plot(ema20, color=color.green)
-plot(ema50, color=color.orange)
-
----
-
 from flask import Flask, request, jsonify
 from binance.client import Client
 from binance.enums import *
