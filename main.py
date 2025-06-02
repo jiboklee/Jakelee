@@ -8,7 +8,6 @@ import time
 
 app = Flask(__name__)
 
-# 🔐 환경변수에서 API 키 가져오기
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 
@@ -21,28 +20,28 @@ def home():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    print("=== [Webhook Activated] ===")
     try:
-        data = request.get_json(force=True)
-        print("[Webhook Triggered] 🔔")
-        print("Payload:", data)
+        data = request.get_data(as_text=True)
+        print("[Raw Body]:", data)
 
-        symbol = data.get("symbol")
-        action = data.get("action")
-        amount = data.get("amount")
+        try:
+            json_data = json.loads(data)
+        except Exception as e:
+            print("[❌ ERROR] JSON 파싱 실패:", e)
+            return jsonify({"error": "Invalid JSON"}), 400
+
+        print("[Parsed JSON]:", json_data)
+
+        symbol = json_data.get("symbol")
+        action = json_data.get("action")
+        amount = json_data.get("amount")
 
         print(f"[🔍 Parsed] symbol={symbol}, action={action}, amount={amount}")
 
-        # 필수 필드 누락 체크
         if not symbol or not action or not amount:
             print("[❌ ERROR] Missing symbol/action/amount")
-            return jsonify({"error": "Missing symbol/action/amount"}), 400
-
-        # amount를 float으로 변환 시도
-        try:
-            amount = float(amount)
-        except Exception as e:
-            print(f"[❌ ERROR] amount 변환 실패: amount={amount}, error={e}")
-            return jsonify({"error": f"Invalid amount format: {amount}"}), 400
+            return jsonify({"error": "Missing fields"}), 400
 
         # 🔧 레버리지 설정
         set_leverage(symbol, leverage=10)
@@ -56,7 +55,6 @@ def webhook():
         print("[❌ UNHANDLED Exception]:", str(e))
         return jsonify({"error": str(e)}), 500
 
-# 🔧 레버리지 설정 함수
 def set_leverage(symbol, leverage=10):
     url = "https://fapi.binance.com/fapi/v1/leverage"
     params = {
@@ -76,10 +74,8 @@ def set_leverage(symbol, leverage=10):
     res = requests.post(url, params=params, headers=headers)
     print("[⚙️ Set Leverage Response]:", res.text)
 
-# 📤 주문 실행 함수
 def place_order(symbol, action, amount):
     url = "https://fapi.binance.com/fapi/v1/order"
-
     try:
         params = {
             "symbol": symbol,
@@ -107,7 +103,7 @@ def place_order(symbol, action, amount):
         print("[❌ Binance Order Exception]:", str(e))
         return {"error": str(e)}
 
-# ✅ Render용 포트 실행
+# Render 포트 실행
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
