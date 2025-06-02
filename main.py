@@ -1,3 +1,37 @@
+//@version=5
+indicator("Scalp_TrendMomentum_5min_Aggressive", overlay=true)
+
+ema20 = ta.ema(close, 20)
+ema50 = ta.ema(close, 50)
+rsi = ta.rsi(close, 14)
+vol = volume
+volAvg = ta.sma(volume, 20)
+
+longTrend = ema20 > ema50
+longRSI = rsi < 60
+longCandle = (close > open) and (close - open > (high - low) * 0.6)
+longVolume = vol > volAvg
+
+longSignal = longTrend and longRSI and longCandle and longVolume
+
+shortTrend = ema20 < ema50
+shortRSI = rsi > 40
+shortCandle = (close < open) and (open - close > (high - low) * 0.6)
+shortVolume = vol > volAvg
+
+shortSignal = shortTrend and shortRSI and shortCandle and shortVolume
+
+alertcondition(longSignal, title="Aggressive Long", message='{"signal":"buy", "strategy":"Aggressive5min", "ticker":"{{ticker}}", "price":{{close}}}')
+alertcondition(shortSignal, title="Aggressive Short", message='{"signal":"sell", "strategy":"Aggressive5min", "ticker":"{{ticker}}", "price":{{close}}}')
+
+plotshape(longSignal, title="Buy", location=location.belowbar, color=color.lime, style=shape.triangleup, size=size.small)
+plotshape(shortSignal, title="Sell", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.small)
+
+plot(ema20, color=color.green)
+plot(ema50, color=color.orange)
+
+---
+
 from flask import Flask, request, jsonify
 from binance.client import Client
 from binance.enums import *
@@ -12,41 +46,38 @@ client = Client(API_KEY, API_SECRET)
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        data = request.get_json(force=True)  # force=True: JSON이 아니더라도 파싱 시도
+        data = request.get_json(force=True)
         if not data:
             print("❌ [ERROR] Webhook에 JSON 데이터 없음")
             return jsonify({"error": "Invalid JSON"}), 400
 
         signal = data.get("signal")
-        if signal not in ["buy", "sell"]:
-            print(f"❌ [ERROR] 잘못된 signal 값: {signal}")
-            return jsonify({"error": "Invalid or missing 'signal'"}), 400
+        strategy = data.get("strategy")
+        if signal not in ["buy", "sell"] or strategy != "Aggressive5min":
+            print(f"❌ [ERROR] 잘못된 요청: signal={signal}, strategy={strategy}")
+            return jsonify({"error": "Invalid signal or strategy"}), 400
 
         symbol = "BTCUSDT"
         usdt_amount = 30
         leverage = 5
 
-        # 레버리지 세팅
         client.futures_change_leverage(symbol=symbol, leverage=leverage)
-
         mark_price = float(client.futures_mark_price(symbol=symbol)['markPrice'])
         qty = round((usdt_amount * leverage) / mark_price, 3)
 
-        print(f"📥 Webhook 수신됨: {signal.upper()} / 수량: {qty} / 가격: {mark_price}")
+        print(f"📥 Webhook 수신됨: {signal.upper()} | 전략: {strategy} | 수량: {qty} | 가격: {mark_price}")
 
-        # 진입 주문
         if signal == "buy":
             client.futures_create_order(symbol=symbol, side=SIDE_BUY, type=ORDER_TYPE_MARKET, quantity=qty)
-            tp = round(mark_price * 1.006, 2)
+            tp = round(mark_price * 1.004, 2)
             sl = round(mark_price * 0.996, 2)
             close_side = SIDE_SELL
-        else:  # sell
+        else:
             client.futures_create_order(symbol=symbol, side=SIDE_SELL, type=ORDER_TYPE_MARKET, quantity=qty)
-            tp = round(mark_price * 0.994, 2)
+            tp = round(mark_price * 0.996, 2)
             sl = round(mark_price * 1.004, 2)
             close_side = SIDE_BUY
 
-        # TP 주문
         client.futures_create_order(
             symbol=symbol,
             side=close_side,
@@ -57,7 +88,6 @@ def webhook():
             reduceOnly=True
         )
 
-        # SL 주문
         try:
             client.futures_create_order(
                 symbol=symbol,
