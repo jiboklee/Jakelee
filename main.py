@@ -35,21 +35,34 @@ def webhook():
 
         symbol = json_data.get("symbol")
         action = json_data.get("action")
-        amount = json_data.get("amount")
+        amount = float(json_data.get("amount"))
+        entry_price = float(json_data.get("price"))
 
-        print(f"[🔍 Parsed] symbol={symbol}, action={action}, amount={amount}")
+        if not symbol or not action or not amount or not entry_price:
+            return jsonify({"error": "Missing required fields"}), 400
 
-        if not symbol or not action or not amount:
-            print("[❌ ERROR] Missing symbol/action/amount")
-            return jsonify({"error": "Missing fields"}), 400
+        # 투자 전문가 기준 추천 TP/SL 비율 (익절 +1.2%, 손절 -0.8%)
+        tp = round(entry_price * (1.012 if action == "buy" else 0.988), 2)
+        sl = round(entry_price * (0.992 if action == "buy" else 1.012), 2)
 
-        # 🔧 레버리지 설정
+        print(f"[🔍] {action.upper()} {symbol} @ {entry_price} → TP: {tp}, SL: {sl}")
+
+        # 레버리지 설정
         set_leverage(symbol, leverage=10)
 
-        # 📈 주문 실행
-        response = place_order(symbol, action, amount)
-        print("[✅ Order Response]:", response)
-        return jsonify(response)
+        # 시장가 주문
+        market_res = place_market_order(symbol, action, amount)
+        print("[✅ Market Order]:", market_res)
+
+        # TP/SL 지정가 주문
+        tp_order = place_limit_order(symbol, "sell" if action == "buy" else "buy", amount, tp)
+        sl_order = place_stop_market_order(symbol, "sell" if action == "buy" else "buy", amount, sl)
+
+        return jsonify({
+            "market_order": market_res,
+            "tp_order": tp_order,
+            "sl_order": sl_order
+        })
 
     except Exception as e:
         print("[❌ UNHANDLED Exception]:", str(e))
@@ -62,48 +75,54 @@ def set_leverage(symbol, leverage=10):
         "leverage": leverage,
         "timestamp": int(time.time() * 1000)
     }
+    sign_and_send(params, url)
 
+def place_market_order(symbol, action, amount):
+    url = "https://fapi.binance.com/fapi/v1/order"
+    params = {
+        "symbol": symbol,
+        "side": action.upper(),
+        "type": "MARKET",
+        "quantity": round(amount, 3),
+        "timestamp": int(time.time() * 1000)
+    }
+    return sign_and_send(params, url)
+
+def place_limit_order(symbol, action, amount, price):
+    url = "https://fapi.binance.com/fapi/v1/order"
+    params = {
+        "symbol": symbol,
+        "side": action.upper(),
+        "type": "LIMIT",
+        "quantity": round(amount, 3),
+        "price": price,
+        "timeInForce": "GTC",
+        "timestamp": int(time.time() * 1000)
+    }
+    return sign_and_send(params, url)
+
+def place_stop_market_order(symbol, action, amount, stop_price):
+    url = "https://fapi.binance.com/fapi/v1/order"
+    params = {
+        "symbol": symbol,
+        "side": action.upper(),
+        "type": "STOP_MARKET",
+        "stopPrice": stop_price,
+        "closePosition": False,
+        "quantity": round(amount, 3),
+        "timestamp": int(time.time() * 1000)
+    }
+    return sign_and_send(params, url)
+
+def sign_and_send(params, url):
     query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
     signature = hmac.new(API_SECRET.encode(), query_string.encode(), hashlib.sha256).hexdigest()
     params["signature"] = signature
-
-    headers = {
-        "X-MBX-APIKEY": API_KEY
-    }
-
+    headers = {"X-MBX-APIKEY": API_KEY}
     res = requests.post(url, params=params, headers=headers)
-    print("[⚙️ Set Leverage Response]:", res.text)
+    print(f"[🧾 Binance API Response from {url}]:", res.text)
+    return res.json()
 
-def place_order(symbol, action, amount):
-    url = "https://fapi.binance.com/fapi/v1/order"
-    try:
-        params = {
-            "symbol": symbol,
-            "side": "BUY" if action.lower() == "buy" else "SELL",
-            "type": "MARKET",
-            "quantity": round(float(amount), 3),
-            "timestamp": int(time.time() * 1000)
-        }
-
-        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
-        signature = hmac.new(API_SECRET.encode(), query_string.encode(), hashlib.sha256).hexdigest()
-        params["signature"] = signature
-
-        headers = {
-            "X-MBX-APIKEY": API_KEY
-        }
-
-        print("[📤 Request Params]:", params)
-        res = requests.post(url, params=params, headers=headers)
-        print("[🧾 Binance API Response]:", res.text)
-
-        return res.json()
-
-    except Exception as e:
-        print("[❌ Binance Order Exception]:", str(e))
-        return {"error": str(e)}
-
-# Render 포트 실행
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
