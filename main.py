@@ -35,37 +35,27 @@ def webhook():
 
         symbol = json_data.get("symbol")
         action = json_data.get("action")
-        amount = float(json_data.get("amount"))
-        entry_price = float(json_data.get("price"))
+        amount = json_data.get("amount")
+        price = float(json_data.get("price"))
+        tp_mul = float(json_data.get("tp_multiplier", 1.004))
+        sl_mul = float(json_data.get("sl_multiplier", 0.996))
 
-        if not symbol or not action or not amount or not entry_price:
+        if not symbol or not action or not amount or not price:
+            print("[❌ ERROR] 필수 데이터 누락")
             return jsonify({"error": "Missing required fields"}), 400
 
-        # 투자 전문가 기준 추천 TP/SL 비율 (익절 +1.2%, 손절 -0.8%)
-        tp = round(entry_price * (1.012 if action == "buy" else 0.988), 2)
-        sl = round(entry_price * (0.992 if action == "buy" else 1.012), 2)
+        tp = round(price * tp_mul, 2)
+        sl = round(price * sl_mul, 2)
 
-        print(f"[🔍] {action.upper()} {symbol} @ {entry_price} → TP: {tp}, SL: {sl}")
+        print(f"[📈 TP/SL 계산] 진입가={price}, TP={tp}, SL={sl}")
 
-        # 레버리지 설정
         set_leverage(symbol, leverage=10)
-
-        # 시장가 주문
-        market_res = place_market_order(symbol, action, amount)
-        print("[✅ Market Order]:", market_res)
-
-        # TP/SL 지정가 주문
-        tp_order = place_limit_order(symbol, "sell" if action == "buy" else "buy", amount, tp)
-        sl_order = place_stop_market_order(symbol, "sell" if action == "buy" else "buy", amount, sl)
-
-        return jsonify({
-            "market_order": market_res,
-            "tp_order": tp_order,
-            "sl_order": sl_order
-        })
+        response = place_order(symbol, action, amount, tp, sl)
+        print("[✅ 주문 결과]:", response)
+        return jsonify(response)
 
     except Exception as e:
-        print("[❌ UNHANDLED Exception]:", str(e))
+        print("[❌ UNHANDLED ERROR]:", str(e))
         return jsonify({"error": str(e)}), 500
 
 def set_leverage(symbol, leverage=10):
@@ -75,54 +65,52 @@ def set_leverage(symbol, leverage=10):
         "leverage": leverage,
         "timestamp": int(time.time() * 1000)
     }
-    sign_and_send(params, url)
+    sign(params)
+    headers = {"X-MBX-APIKEY": API_KEY}
+    res = requests.post(url, params=params, headers=headers)
+    print("[⚙️ 레버리지 설정 결과]:", res.text)
 
-def place_market_order(symbol, action, amount):
+def place_order(symbol, action, amount, tp, sl):
     url = "https://fapi.binance.com/fapi/v1/order"
+    side = "BUY" if action.lower() == "buy" else "SELL"
+
     params = {
         "symbol": symbol,
-        "side": action.upper(),
+        "side": side,
         "type": "MARKET",
-        "quantity": round(amount, 3),
+        "quantity": round(float(amount), 3),
         "timestamp": int(time.time() * 1000)
     }
-    return sign_and_send(params, url)
+    sign(params)
+    headers = {"X-MBX-APIKEY": API_KEY}
+    res = requests.post(url, params=params, headers=headers)
+    print("[📤 시장 주문 응답]:", res.text)
 
-def place_limit_order(symbol, action, amount, price):
-    url = "https://fapi.binance.com/fapi/v1/order"
-    params = {
-        "symbol": symbol,
-        "side": action.upper(),
-        "type": "LIMIT",
-        "quantity": round(amount, 3),
-        "price": price,
-        "timeInForce": "GTC",
-        "timestamp": int(time.time() * 1000)
-    }
-    return sign_and_send(params, url)
+    # TP/SL 주문 설정
+    opp_side = "SELL" if side == "BUY" else "BUY"
 
-def place_stop_market_order(symbol, action, amount, stop_price):
-    url = "https://fapi.binance.com/fapi/v1/order"
-    params = {
-        "symbol": symbol,
-        "side": action.upper(),
-        "type": "STOP_MARKET",
-        "stopPrice": stop_price,
-        "closePosition": False,
-        "quantity": round(amount, 3),
-        "timestamp": int(time.time() * 1000)
-    }
-    return sign_and_send(params, url)
+    for label, price_level, stop_type in [("TP", tp, "TAKE_PROFIT_MARKET"), ("SL", sl, "STOP_MARKET")]:
+        stop_params = {
+            "symbol": symbol,
+            "side": opp_side,
+            "type": stop_type,
+            "stopPrice": price_level,
+            "closePosition": "true",
+            "timeInForce": "GTC",
+            "timestamp": int(time.time() * 1000)
+        }
+        sign(stop_params)
+        stop_res = requests.post(url, params=stop_params, headers=headers)
+        print(f"[📌 {label} 주문]:", stop_res.text)
 
-def sign_and_send(params, url):
+    return res.json()
+
+def sign(params):
     query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
     signature = hmac.new(API_SECRET.encode(), query_string.encode(), hashlib.sha256).hexdigest()
     params["signature"] = signature
-    headers = {"X-MBX-APIKEY": API_KEY}
-    res = requests.post(url, params=params, headers=headers)
-    print(f"[🧾 Binance API Response from {url}]:", res.text)
-    return res.json()
 
+# ✅ Render에서 동작하도록 포트 지정
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
