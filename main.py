@@ -14,12 +14,16 @@ API_SECRET = os.getenv("API_SECRET")
 if not API_KEY or not API_SECRET:
     raise Exception("❌ API_KEY or API_SECRET is not set in environment variables")
 
+# 현재 포지션 상태 저장
+current_position = None  # "long", "short", None
+
 @app.route('/')
 def home():
     return "Binance Auto Trading Server is running."
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    global current_position
     print("=== [Webhook Activated] ===")
     try:
         data = request.get_data(as_text=True)
@@ -34,7 +38,7 @@ def webhook():
         print("[Parsed JSON]:", json_data)
 
         symbol = json_data.get("symbol")
-        action = json_data.get("action")
+        action = json_data.get("action").lower()
         amount = json_data.get("amount")
         price = float(json_data.get("price"))
         tp_mul = float(json_data.get("tp_multiplier", 1.004))
@@ -44,6 +48,14 @@ def webhook():
             print("[❌ ERROR] 필수 데이터 누락")
             return jsonify({"error": "Missing required fields"}), 400
 
+        # 롱 or 숏 중복 진입 방지 로직
+        if current_position == "long" and action == "sell":
+            print("⚠️ 현재 롱 포지션 보유중 → 숏 시그널 무시")
+            return jsonify({"status": "ignored - holding long"})
+        elif current_position == "short" and action == "buy":
+            print("⚠️ 현재 숏 포지션 보유중 → 롱 시그널 무시")
+            return jsonify({"status": "ignored - holding short"})
+
         tp = round(price * tp_mul, 2)
         sl = round(price * sl_mul, 2)
 
@@ -51,7 +63,11 @@ def webhook():
 
         set_leverage(symbol, leverage=10)
         response = place_order(symbol, action, amount, tp, sl)
-        print("[✅ 주문 결과]:", response)
+
+        # 현재 포지션 업데이트
+        current_position = "long" if action == "buy" else "short"
+        print(f"[📌 현재 포지션] → {current_position}")
+
         return jsonify(response)
 
     except Exception as e:
@@ -72,7 +88,7 @@ def set_leverage(symbol, leverage=10):
 
 def place_order(symbol, action, amount, tp, sl):
     url = "https://fapi.binance.com/fapi/v1/order"
-    side = "BUY" if action.lower() == "buy" else "SELL"
+    side = "BUY" if action == "buy" else "SELL"
 
     params = {
         "symbol": symbol,
